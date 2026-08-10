@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+data/sql/*.sqlite3
+data/sql/*.sqlite3-*
+data/job_defaults.json
+data/logs/*.log

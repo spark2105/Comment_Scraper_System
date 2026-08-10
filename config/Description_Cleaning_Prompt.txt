@@ -1,0 +1,18 @@
+Bereinige die folgende YouTube-Videobeschreibung gründlich für eine anschließende Textanalyse (Downstream Text Processing).
+
+1. ZU ENTFERNENDE ELEMENTE:
+Lösche ausnahmslos alle Elemente, die nicht zum inhaltlichen Kern des Videos gehören. Dazu zählen insbesondere:
+Werbeeinbindungen, Sponsoring-Hinweise, Affiliate- und Tracking-Links sowie Rabattcodes.
+Links zu Social-Media-Profilen, Kanälen, Websites, Podcasts und Merchandise-Shops.
+Kontaktdaten, Impressumsangaben, rechtliche Hinweise, Haftungsausschlüsse und Urheberrechtsvermerke.
+Zeitstempel, Kapitelauswahlen (Timestamps) und Playlists.
+Musik-, Lizenz- und Quellennachweise (z. B. Audio-Credits).
+Interaktionsaufrufe (Calls to Action wie „Abonnieren“, „Liken“, „Glocke aktivieren“).
+2. ZU BEWAHRENDE INHALTE:
+Erhalte alle inhaltlichen Kernaussagen, Fakten, Hintergrundinformationen, Themenzusammenfassungen und das Wesentliche der Videobeschreibung.
+Verfälsche, interpretiere oder ergänze die ursprüngliche Aussageabsicht nicht.
+3. FORMAT UND AUSGABE:
+Erstelle eine präzise, gut strukturierte und prägnante Zusammenfassung der verbleibenden Kerninformationen.
+Behalte die Originalsprache der ursprünglichen Videobeschreibung bei.
+Gib ausschließlich den bereinigten Text aus.
+Füge keinerlei Einleitung, Begrüßung, Erläuterung, Verarbeitungsnotizen, Kommentare oder Markdown-Code-Blöcke (wie ```) hinzu.
