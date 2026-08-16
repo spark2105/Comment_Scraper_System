@@ -14,6 +14,7 @@ from .scraper import DescriptionCleaningAbort, ScrapeCancelled, ScrapeConfig, Sc
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOG_DIR = PROJECT_ROOT / "data" / "logs"
+JOB_DIR = PROJECT_ROOT / "data" / "jobs"
 DATABASE_PATH = str(PROJECT_ROOT / "data" / "sql" / "comment_scraper.sqlite3")
 
 
@@ -38,6 +39,7 @@ class JobManager:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._current: JobState | None = None
+        self._history: dict[str, JobState] = self._load_history()
         self._pause_requested = threading.Event()
         self._cancel_requested = threading.Event()
 
@@ -61,6 +63,7 @@ class JobManager:
                 },
             )
             self._current = state
+            self._history[job_id] = state
             self._append_log_locked(state, "info", "Scraping job created.")
             thread = threading.Thread(
                 target=self._run,
@@ -74,6 +77,26 @@ class JobManager:
     def current(self) -> JobState | None:
         with self._lock:
             return self._copy_state_locked(self._current) if self._current else None
+
+    def list_jobs(self) -> list[JobState]:
+        with self._lock:
+            states = sorted(self._history.values(), key=lambda item: item.started_at, reverse=True)
+            return [self._copy_state_locked(state) for state in states if state is not None]
+
+    def get(self, job_id: str) -> JobState:
+        with self._lock:
+            return self._copy_state_locked(self._require_history_locked(job_id))
+
+    def delete(self, job_id: str) -> None:
+        with self._lock:
+            state = self._require_history_locked(job_id)
+            if state.status in {"starting", "running", "paused"}:
+                raise RuntimeError("Active jobs cannot be deleted. Cancel the job first.")
+            self._history.pop(job_id, None)
+            if self._current and self._current.job_id == job_id:
+                self._current = None
+            self._job_path(job_id).unlink(missing_ok=True)
+            (LOG_DIR / f"{job_id}.log").unlink(missing_ok=True)
 
     def pause(self, job_id: str) -> JobState:
         with self._lock:
@@ -104,7 +127,7 @@ class JobManager:
 
     def logs(self, job_id: str) -> list[dict[str, str]]:
         with self._lock:
-            state = self._require_current_locked(job_id)
+            state = self._require_history_locked(job_id)
             return list(state.logs)
 
     def _run(self, state: JobState, api_key: str, config: ScrapeConfig) -> None:
@@ -172,11 +195,66 @@ class JobManager:
         log_path = LOG_DIR / f"{state.job_id}.log"
         with log_path.open("a", encoding="utf-8") as file:
             file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        self._persist_locked(state)
+
+
+    def _require_history_locked(self, job_id: str) -> JobState:
+        if job_id not in self._history:
+            raise KeyError(f"Unknown scraping job: {job_id}")
+        return self._history[job_id]
+
+    @staticmethod
+    def _job_path(job_id: str) -> Path:
+        return JOB_DIR / f"{job_id}.json"
+
+    def _persist_locked(self, state: JobState) -> None:
+        JOB_DIR.mkdir(parents=True, exist_ok=True)
+        self._job_path(state.job_id).write_text(
+            json.dumps(state.public_dict(), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
     def _require_current_locked(self, job_id: str) -> JobState:
         if not self._current or self._current.job_id != job_id:
             raise KeyError(f"Unknown scraping job: {job_id}")
         return self._current
+
+    def _load_history(self) -> dict[str, JobState]:
+        history: dict[str, JobState] = {}
+        if not JOB_DIR.exists():
+            return history
+        for path in JOB_DIR.glob("*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                state = JobState(
+                    job_id=str(data["job_id"]),
+                    status=str(data.get("status", "failed")),
+                    stage=str(data.get("stage", "failed")),
+                    current_message=str(data.get("current_message", "")),
+                    started_at=str(data.get("started_at", utc_now())),
+                    finished_at=data.get("finished_at"),
+                    summary=dict(data.get("summary") or {}),
+                    error=data.get("error"),
+                    logs=list(data.get("logs") or []),
+                    config_summary=dict(data.get("config_summary") or {}),
+                )
+            except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if state.status in {"starting", "running", "paused"}:
+                state.status = "failed"
+                state.stage = "failed"
+                state.error = "Job was interrupted because the crawler service was restarted."
+                state.finished_at = utc_now()
+                state.logs.append(
+                    {
+                        "timestamp": state.finished_at,
+                        "level": "error",
+                        "message": state.error,
+                    }
+                )
+                self._persist_locked(state)
+            history[state.job_id] = state
+        return history
 
     @staticmethod
     def _copy_state_locked(state: JobState | None) -> JobState | None:

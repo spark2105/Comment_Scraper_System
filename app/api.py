@@ -73,6 +73,15 @@ async def create_job(request: JobRequest) -> dict[str, Any]:
     return state.public_dict()
 
 
+@app.get("/jobs")
+async def list_jobs() -> dict[str, list[dict[str, Any]]]:
+    jobs = []
+    for state in manager.list_jobs():
+        data = state.public_dict()
+        data["logs"] = []
+        jobs.append(data)
+    return {"jobs": jobs}
+
 @app.get("/jobs/current")
 async def current_job() -> dict[str, Any]:
     state = manager.current()
@@ -81,11 +90,21 @@ async def current_job() -> dict[str, Any]:
 
 @app.get("/jobs/{job_id}")
 async def get_job(job_id: str) -> dict[str, Any]:
-    state = manager.current()
-    if not state or state.job_id != job_id:
-        raise HTTPException(status_code=404, detail="Scraping job not found.")
-    return state.public_dict()
+    try:
+        return manager.get(job_id).public_dict()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Scraping job not found.") from exc
 
+
+@app.delete("/jobs/{job_id}")
+async def delete_job(job_id: str) -> dict[str, str]:
+    try:
+        manager.delete(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Scraping job not found.") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "deleted"}
 
 @app.get("/jobs/{job_id}/logs")
 async def get_job_logs(job_id: str) -> dict[str, Any]:

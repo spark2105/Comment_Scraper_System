@@ -23,6 +23,8 @@ def api_request(method: str, path: str, **kwargs: Any) -> Any:
     try:
         response = httpx.request(method, f"{CRAWLER_URL}{path}", timeout=15, **kwargs)
         response.raise_for_status()
+        if response.status_code == 204:
+            return {}
         return response.json()
     except httpx.HTTPStatusError as exc:
         try:
@@ -286,6 +288,93 @@ def render_logs(logs: list[dict[str, str]]) -> None:
     st.code("\n".join(lines), language="text")
 
 
+def render_jobs() -> None:
+    st.title("Jobs")
+    st.caption("Review scraping jobs, their logs, and failures.")
+    try:
+        result = api_request("GET", "/jobs")
+    except RuntimeError as exc:
+        st.error(str(exc))
+        return
+
+    jobs = result.get("jobs", [])
+    if not jobs:
+        st.info("No scraping jobs have been recorded yet.")
+        return
+
+    rows = []
+    for job in jobs:
+        summary = job.get("summary") or {}
+        rows.append(
+            {
+                "Job ID": job.get("job_id"),
+                "Status": job.get("status"),
+                "Started": job.get("started_at"),
+                "Finished": job.get("finished_at") or "-",
+                "Videos": summary.get("videos", 0),
+                "Threads": summary.get("threads", 0),
+                "Comments": summary.get("comments", 0),
+                "Errors": summary.get("errors", 0),
+            }
+        )
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+    job_ids = [job["job_id"] for job in jobs]
+    selected = st.selectbox(
+        "Open job",
+        job_ids,
+        format_func=lambda job_id: next(
+            (
+                f"{job_id[:8]} · {job.get('status', 'unknown')} · {job.get('started_at', '')}"
+                for job in jobs
+                if job.get("job_id") == job_id
+            ),
+            job_id,
+        ),
+    )
+    try:
+        job = api_request("GET", f"/jobs/{selected}")
+        logs = api_request("GET", f"/jobs/{selected}/logs").get("logs", [])
+    except RuntimeError as exc:
+        st.error(str(exc))
+        return
+
+    st.subheader(f"Job details · {selected[:8]}")
+    status = job.get("status", "unknown")
+    st.caption(
+        f"Status: {status} · Started: {job.get('started_at', '-')} · "
+        f"Finished: {job.get('finished_at') or '-'}"
+    )
+    if job.get("error"):
+        st.error(job["error"])
+
+    warnings_and_errors = [
+        entry for entry in logs if entry.get("level") in {"warning", "error"}
+    ]
+    if warnings_and_errors:
+        st.markdown("#### Errors and warnings")
+        for entry in warnings_and_errors:
+            message = f"{entry.get('timestamp', '')} · {entry.get('message', '')}"
+            if entry.get("level") == "error":
+                st.error(message)
+            else:
+                st.warning(message)
+
+    with st.expander("Job configuration"):
+        st.json(job.get("config_summary") or {})
+    with st.expander("Full job log", expanded=True):
+        render_logs(logs)
+
+    if status in {"starting", "running", "paused"}:
+        st.info("Active jobs cannot be deleted. Cancel the job first.")
+    elif st.button("Delete job", type="secondary", key=f"delete_job_{selected}"):
+        try:
+            api_request("DELETE", f"/jobs/{selected}")
+            st.success("Job deleted.")
+            st.rerun()
+        except RuntimeError as exc:
+            st.error(str(exc))
+
 def render_browser() -> None:
     st.title("Videos and comments")
     st.caption("Browse and inspect the stored YouTube data.")
@@ -386,9 +475,11 @@ def main() -> None:
     service_status = ensure_local_services()
     initialise_state()
     api_key = render_sidebar(service_status)
-    page = st.sidebar.radio("View", ["Scraping", "Videos & comments"])
+    page = st.sidebar.radio("View", ["Scraping", "Jobs", "Videos & comments"])
     if page == "Scraping":
         render_scraping(api_key)
+    elif page == "Jobs":
+        render_jobs()
     else:
         render_browser()
 

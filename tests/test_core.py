@@ -77,6 +77,25 @@ class CoreTests(unittest.TestCase):
         with self.assertRaises(DescriptionCleaningError):
             cleaner.clean("Raw description", "Clean it.")
 
+    def test_cleaner_retries_cuda_out_of_memory(self) -> None:
+        cleaner = DescriptionCleaner(model="llama3.2")
+        cleaner.client = Mock()
+        cleaner.client.chat.side_effect = [
+            RuntimeError("CUDA error: out of memory"),
+            {"message": {"content": "Cleaned after waiting"}},
+        ]
+        waits: list[tuple[int, int]] = []
+        self.assertEqual(
+            cleaner.clean(
+                "Raw description",
+                "Clean it.",
+                retry_delay=0,
+                on_cuda_oom=lambda attempt, delay: waits.append((attempt, delay)),
+            ),
+            "Cleaned after waiting",
+        )
+        self.assertEqual(waits, [(1, 0)])
+
     def test_job_defaults_are_persisted_without_api_key(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "job_defaults.json"

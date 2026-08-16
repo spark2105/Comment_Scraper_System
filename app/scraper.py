@@ -232,6 +232,7 @@ class Scraper:
         self._process_or_skip(video)
 
     def _process_or_skip(self, video: dict[str, Any]) -> None:
+        video["scraped_at"] = video.get("scraped_at") or utc_now()
         video_id = video["id"]
         if video_id in self.known_ids:
             if video_id in self.cleaning_ids:
@@ -266,7 +267,17 @@ class Scraper:
         video_id = video["id"]
         description = video.get("description", "")
         try:
-            cleaned = self.cleaner.clean(description, self.config.description_prompt)
+            cleaned = self.cleaner.clean(
+                description,
+                self.config.description_prompt,
+                on_cuda_oom=lambda attempt, delay: self.log(
+                    "warning",
+                    f"GPU memory is currently insufficient for description cleaning; waiting {delay}s before retry {attempt}.",
+                ),
+                should_continue=self.checkpoint,
+            )
+        except ScrapeCancelled:
+            raise
         except Exception as exc:
             self._record_error("description_cleaning", video_id, exc)
             raise DescriptionCleaningAbort(str(exc)) from exc
